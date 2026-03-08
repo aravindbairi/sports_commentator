@@ -1,5 +1,6 @@
 .venv
 .idea
-videos
+data
+checkpoints
 *.iml
 __pycache__
