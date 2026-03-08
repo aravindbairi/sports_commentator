@@ -2,13 +2,12 @@ from collections import deque
 
 import cv2
 
-from detector import infer_clip
 
-
-def sliding_infer(video_path,T=16,stride=8,debug=False):
+def read_sliding_window(video_path,T=16,stride=8,max_windows=50):
     cap = cv2.VideoCapture(video_path)
     frame_buffer = deque(maxlen=T)
-    frame_count =0;
+    frame_count =0
+    windows = []
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -17,14 +16,8 @@ def sliding_infer(video_path,T=16,stride=8,debug=False):
         frame_buffer.append(frame)
         if len(frame_buffer) == T and frame_count % stride == 0:
             frames = list(frame_buffer)
-            preds = infer_clip(frames,topk=5)
-            yield {"frames":frames,"preds":preds}
+            windows.append((frame_count,frames))
+            if len(windows)>max_windows:
+                break
     cap.release()
-def read_video(path):
-    cap = cv2.VideoCapture(path)
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        yield frame
-    cap.release()
+    return windows
