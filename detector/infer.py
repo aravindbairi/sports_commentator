@@ -1,20 +1,17 @@
+import time
+
 import cv2
+import numpy as np
 import torch
-from torchvision import models, transforms
+from torchvision import transforms,models
 
 from dataset.dataset import CLASS_NAMES
+from detector.model_loader import build_model
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = models.video.r2plus1d_18(pretrained=False)
-in_features = model.fc.in_features
-model.fc = torch.nn.Linear(in_features=in_features,out_features=len(CLASS_NAMES))
-model.load_state_dict(torch.load("../checkpoints/best_model.pth", map_location=device))
-model = model.eval().to(device)
-
-spatial_size = 112
+SPATIAL_SIZE = 112
 transform = transforms.Compose([
     transforms.ToPILImage(),
-    transforms.Resize((spatial_size, spatial_size)),
+    transforms.Resize((SPATIAL_SIZE, SPATIAL_SIZE)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])
 ])
@@ -28,20 +25,22 @@ def frames_to_tensor(frames):
     clip = clip.unsqueeze(0)
     return clip
 
-@torch.no_grad()
-def infer_clip(frames,topk=3):
-    tensor = frames_to_tensor(frames).to(device)
-    logits = model(tensor)
-    probs = torch.nn.functional.softmax(logits, dim=1)[0]
-    topk_values, topk_indices = torch.topk(probs, k=topk)
-    return [(int(idx.item()),float(val.item())) for idx,val in zip(topk_indices,topk_values)]
+class Detector:
+    def __init__(self, checkpoint, device=None,num_classes=len(CLASS_NAMES), weights=models.video.R2Plus1D_18_Weights.DEFAULT):
+        self.model,self.device = build_model(num_classes=num_classes, weights=weights, device=device,checkpoint_path=checkpoint)
+        self.model.eval()
+        self.class_names = CLASS_NAMES[:num_classes]
 
-def detect_event(frame_number):
-    if frame_number==200:
-        return {
-            "event": "goal",
-            "team": "Portugal",
-            "player": "Ronaldo",
-            "time": "00:07"
-        }
-    return None
+    @torch.no_grad()
+    def infer_clip(self,frames,topk=3):
+        tensor = frames_to_tensor(frames).to(self.device)
+        start_time = time.time()
+        logits = self.model(tensor)
+        probs = torch.nn.functional.softmax(logits, dim=1)[0].cpu().numpy()
+        end_time = time.time()
+        idxs = np.argsort(probs)[::-1][:topk]
+        results = [(self.class_names[int(i)], float(probs[int(i)])) for i in idxs]
+        return {"topk": results, "time": (end_time - start_time)*1000, "raw_probs": probs}
+
+    def infer_batch(self,batch_frames,topk=3):
+        return [self.infer_clip(frame,topk) for frame in batch_frames]
